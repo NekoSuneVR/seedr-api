@@ -1,128 +1,193 @@
-var axios = require("axios");
-var FormData = require('form-data');
+const axios = require("axios");
+const FormData = require("form-data");
 
 module.exports = class Seedr {
-  constructor() {}
+  constructor() {
+    this.token = null;
+  }
 
   async login(username, password) {
-    this.username = username;
-    this.password = password;
-    var data = new FormData();
-    data.append('grant_type', 'password');
-    data.append('client_id', 'seedr_chrome');
-    data.append('type', 'login');
-    data.append('username', this.username);
-    data.append('password', this.password);
-    var token = await axios({
-      method: 'post',
-      url: 'https://www.seedr.cc/oauth_test/token.php',
-      headers: data.getHeaders(),
-      data: data
-    });
-    this.token = token.data["access_token"];
-    this.rft = token.data["refresh_token"];
+    const data = new FormData();
+
+    data.append("grant_type", "password");
+    data.append("client_id", "seedr_chrome");
+    data.append("type", "login");
+    data.append("username", username);
+    data.append("password", password);
+
+    const res = await axios.post(
+      "https://www.seedr.cc/oauth_test/token.php",
+      data,
+      { headers: data.getHeaders() }
+    );
+
+    this.token = res.data.access_token;
+    this.rft = res.data.refresh_token;
+
     return this.token;
-  }
-
-  async getDeviceCode() {
-    var dc = await axios("https://www.seedr.cc/api/device/code?client_id=seedr_xbmc");
-    this.devc = dc.data["device_code"];
-    this.usc = dc.data["user_code"];
-    console.log(`Paste this code into Seedr ${this.usc} || And here is your token ${this.devc}`);
-    return this.usc;
-  }
-
-  async getToken(devc) {
-    var token = await axios("https://www.seedr.cc/api/device/authorize?device_code=" + devc + "&client_id=seedr_xbmc");
-    this.token = token.data["access_token"];
-    return this.token;
-  }
-
-  async addToken(token) {
-    this.token = token;
   }
 
   async addMagnet(magnet) {
-    var data = new FormData();
-    data.append('access_token', this.token);
-    data.append('func', 'add_torrent');
-    data.append('torrent_magnet', magnet);
+    const data = new FormData();
 
-    var res = await axios({
-      method: 'post',
-      url: 'https://www.seedr.cc/oauth_test/resource.php',
-      headers: data.getHeaders(),
-      data: data
-    });
+    data.append("access_token", this.token);
+    data.append("func", "add_torrent");
+    data.append("torrent_magnet", magnet);
+
+    const res = await axios.post(
+      "https://www.seedr.cc/oauth_test/resource.php",
+      data,
+      { headers: data.getHeaders() }
+    );
+
     return res.data;
   }
 
+  // 🚀 FAST VERSION (FIXED)
   async getVideos() {
-    var res = [];
+    const root = await axios.get(
+      `https://www.seedr.cc/api/folder?access_token=${this.token}`
+    );
 
-    var data = await axios("https://www.seedr.cc/api/folder?access_token=" + this.token);
+    const folders = root.data.folders || [];
 
-    for (var folder of data.data.folders) {
-      res.push((await axios("https://www.seedr.cc/api/folder/" + folder.id + "?access_token=" + this.token)).data.files.filter(x => x["play_video"]).map(x => {
-        return {
-          fid: folder.id,
-          id: x["folder_file_id"],
-          name: x.name
-        }
-      }));
+    const results = await Promise.all(
+      folders.map(async (folder) => {
+        const res = await axios.get(
+          `https://www.seedr.cc/api/folder/${folder.id}?access_token=${this.token}`
+        );
+
+        return (res.data.files || [])
+          .filter(f => f.play_video)
+          .map(f => ({
+            fid: folder.id,
+            id: f.folder_file_id,
+            name: f.name
+          }));
+      })
+    );
+
+    return results.flat();
+  }
+
+  // 🚀 FULL FILE LIST (FAST + CLEAN)
+  async getFilesById(id = null) {
+    const url = id
+      ? `https://www.seedr.cc/api/folder/${id}?access_token=${this.token}`
+      : `https://www.seedr.cc/api/folder?access_token=${this.token}`;
+
+    const data = await axios.get(url);
+
+    const d = data.data;
+
+    const res = {
+      parentId: d.parent !== -1 ? d.parent : null,
+      name: d.name,
+      folderSize: 0,
+      totalStorage: d.space_max,
+      usedStorage: d.space_used,
+      type: d.type,
+      files: [],
+      activeTorrents: d.torrents
+    };
+
+    for (const folder of d.folders || []) {
+      res.files.push({
+        id: folder.id,
+        type: "folder",
+        name: folder.name,
+        size: folder.size
+      });
+
+      if (folder.size) {
+        res.folderSize += parseInt(folder.size);
+      }
+    }
+
+    for (const file of d.files || []) {
+      res.files.push({
+        id: file.folder_file_id,
+        type: "file",
+        name: file.name,
+        size: file.size
+      });
+
+      if (file.size) {
+        res.folderSize += parseInt(file.size);
+      }
     }
 
     return res;
   }
 
   async getFile(id) {
-    var data = new FormData();
-    data.append('access_token', this.token);
-    data.append('func', 'fetch_file');
-    data.append('folder_file_id', id);
+    const data = new FormData();
 
-    var res = await axios({
-      method: 'post',
-      url: 'https://www.seedr.cc/oauth_test/resource.php',
-      headers: data.getHeaders(),
-      data: data
-    });
+    data.append("access_token", this.token);
+    data.append("func", "fetch_file");
+    data.append("folder_file_id", id);
+
+    const res = await axios.post(
+      "https://www.seedr.cc/oauth_test/resource.php",
+      data,
+      { headers: data.getHeaders() }
+    );
+
+    return res.data;
+  }
+
+  async rename(id, newName) {
+    const data = new FormData();
+
+    data.append("access_token", this.token);
+    data.append("func", "rename");
+    data.append("rename_to", newName);
+    data.append("file_id", id);
+
+    const res = await axios.post(
+      "https://www.seedr.cc/oauth_test/resource.php",
+      data,
+      { headers: data.getHeaders() }
+    );
+
     return res.data;
   }
 
   async deleteFolder(id) {
-    var data = new FormData();
-    data.append('access_token', this.token);
-    data.append('func', 'delete');
-    data.append('delete_arr', JSON.stringify([{
-      type: 'folder',
-      id: id
-    }]));
+    const data = new FormData();
 
-    var res = await axios({
-      method: 'post',
-      url: 'https://www.seedr.cc/oauth_test/resource.php',
-      headers: data.getHeaders(),
-      data: data
-    });
+    data.append("access_token", this.token);
+    data.append("func", "delete");
+    data.append(
+      "delete_arr",
+      JSON.stringify([{ type: "folder", id }])
+    );
+
+    const res = await axios.post(
+      "https://www.seedr.cc/oauth_test/resource.php",
+      data,
+      { headers: data.getHeaders() }
+    );
+
     return res.data;
   }
 
   async deleteFile(id) {
-    var data = new FormData();
-    data.append('access_token', this.token);
-    data.append('func', 'delete');
-    data.append('delete_arr', JSON.stringify([{
-      type: 'file',
-      id: id
-    }]));
+    const data = new FormData();
 
-    var res = await axios({
-      method: 'post',
-      url: 'https://www.seedr.cc/oauth_test/resource.php',
-      headers: data.getHeaders(),
-      data: data
-    });
+    data.append("access_token", this.token);
+    data.append("func", "delete");
+    data.append(
+      "delete_arr",
+      JSON.stringify([{ type: "file", id }])
+    );
+
+    const res = await axios.post(
+      "https://www.seedr.cc/oauth_test/resource.php",
+      data,
+      { headers: data.getHeaders() }
+    );
+
     return res.data;
   }
-}
+};
