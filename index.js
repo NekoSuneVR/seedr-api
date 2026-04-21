@@ -1,16 +1,48 @@
 const axios = require("axios");
 const fs = require("fs");
+const FormData = require("form-data");
 
 module.exports = class Seedr {
   constructor(email, password) {
     this.email = email;
     this.password = password;
+    this.token = null;
+  }
 
-    this.auth = {
-      auth: {
-        username: email,
-        password: password
-      }
+  // =========================
+  // LOGIN (OAuth TOKEN)
+  // =========================
+  async login() {
+    const form = new FormData();
+    form.append("grant_type", "password");
+    form.append("client_id", "seedr_chrome");
+    form.append("type", "login");
+    form.append("username", this.email);
+    form.append("password", this.password);
+
+    const res = await axios.post(
+      "https://www.seedr.cc/oauth_test/token.php",
+      form,
+      { headers: form.getHeaders() }
+    );
+
+    if (!res.data?.access_token) {
+      throw new Error("Login failed - no token received");
+    }
+
+    this.token = res.data.access_token;
+
+    console.log("🔑 Logged in, token acquired");
+    return this.token;
+  }
+
+  // =========================
+  // AUTH HEADER
+  // =========================
+  get headers() {
+    if (!this.token) throw new Error("Not logged in");
+    return {
+      Authorization: `Bearer ${this.token}`
     };
   }
 
@@ -20,9 +52,8 @@ module.exports = class Seedr {
   async getUser() {
     const res = await axios.get(
       "https://www.seedr.cc/rest/user",
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
@@ -32,18 +63,16 @@ module.exports = class Seedr {
   async getRootFolder() {
     const res = await axios.get(
       "https://www.seedr.cc/rest/folder",
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
   async getFolder(id) {
     const res = await axios.get(
       `https://www.seedr.cc/rest/folder/${id}`,
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
@@ -51,13 +80,12 @@ module.exports = class Seedr {
     const res = await axios.get(
       `https://www.seedr.cc/rest/folder/${id}/download`,
       {
-        ...this.auth,
+        headers: this.headers,
         responseType: "stream"
       }
     );
 
     const writer = fs.createWriteStream(outputPath);
-
     res.data.pipe(writer);
 
     return new Promise((resolve, reject) => {
@@ -70,9 +98,8 @@ module.exports = class Seedr {
     const res = await axios.post(
       "https://www.seedr.cc/rest/folder",
       new URLSearchParams({ path }),
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
@@ -80,18 +107,16 @@ module.exports = class Seedr {
     const res = await axios.post(
       `https://www.seedr.cc/rest/folder/${id}/rename`,
       new URLSearchParams({ rename_to: name }),
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
   async deleteFolder(id) {
     const res = await axios.delete(
       `https://www.seedr.cc/rest/folder/${id}`,
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
@@ -102,13 +127,12 @@ module.exports = class Seedr {
     const res = await axios.get(
       `https://www.seedr.cc/rest/file/${fileId}`,
       {
-        ...this.auth,
+        headers: this.headers,
         responseType: "stream"
       }
     );
 
     const writer = fs.createWriteStream(outputPath);
-
     res.data.pipe(writer);
 
     return new Promise((resolve, reject) => {
@@ -120,35 +144,39 @@ module.exports = class Seedr {
   async getFileHLS(fileId) {
     const res = await axios.get(
       `https://www.seedr.cc/rest/file/${fileId}/hls`,
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
-  async getFileImage(fileId) {
+  async getFileImage(fileId, outputPath) {
     const res = await axios.get(
       `https://www.seedr.cc/rest/file/${fileId}/image`,
       {
-        ...this.auth,
+        headers: this.headers,
         responseType: "stream"
       }
     );
 
-    return res.data;
+    const writer = fs.createWriteStream(outputPath);
+    res.data.pipe(writer);
+
+    return new Promise((resolve, reject) => {
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+    });
   }
 
   async getThumbnail(fileId, outputPath) {
     const res = await axios.get(
       `https://www.seedr.cc/rest/file/${fileId}/thumbnail`,
       {
-        ...this.auth,
+        headers: this.headers,
         responseType: "stream"
       }
     );
 
     const writer = fs.createWriteStream(outputPath);
-
     res.data.pipe(writer);
 
     return new Promise((resolve, reject) => {
@@ -161,18 +189,16 @@ module.exports = class Seedr {
     const res = await axios.post(
       `https://www.seedr.cc/rest/file/${id}/rename`,
       new URLSearchParams({ rename_to: name }),
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
   async deleteFile(id) {
     const res = await axios.delete(
       `https://www.seedr.cc/rest/file/${id}`,
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
@@ -183,9 +209,8 @@ module.exports = class Seedr {
     const res = await axios.post(
       "https://www.seedr.cc/rest/transfer/magnet",
       new URLSearchParams({ magnet }),
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
@@ -193,9 +218,8 @@ module.exports = class Seedr {
     const res = await axios.post(
       "https://www.seedr.cc/rest/transfer/url",
       new URLSearchParams({ url }),
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
@@ -207,8 +231,10 @@ module.exports = class Seedr {
       "https://www.seedr.cc/rest/transfer/file",
       form,
       {
-        ...this.auth,
-        headers: form.getHeaders()
+        headers: {
+          ...this.headers,
+          ...form.getHeaders()
+        }
       }
     );
 
@@ -218,18 +244,16 @@ module.exports = class Seedr {
   async getTransfer(id) {
     const res = await axios.get(
       `https://www.seedr.cc/rest/transfer/${id}`,
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 
   async deleteTransfer(id) {
     const res = await axios.delete(
       `https://www.seedr.cc/rest/transfer/${id}`,
-      this.auth
+      { headers: this.headers }
     );
-
     return res.data;
   }
 };
